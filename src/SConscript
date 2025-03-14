@@ -1,0 +1,49 @@
+# -*- mode:python -*-
+
+import os
+Import("env")
+
+commonSrcs = ["config.cpp", "galloc.cpp", "log.cpp", "pin_cmd.cpp"]
+harnessSrcs = ["zsim_harness.cpp", "debug_harness.cpp"]
+
+libEnv = env.Clone()
+libEnv["CPPFLAGS"]  += libEnv["PINCPPFLAGS"]
+libEnv["LINKFLAGS"] += libEnv["PINLINKFLAGS"]
+libEnv["LIBPATH"]   += libEnv["PINLIBPATH"]
+libEnv["LIBS"]      += libEnv["PINLIBS"]
+
+# Build syscall name file
+def getSyscalls(): 
+    import os, re
+    unistd_file = "/usr/include/asm/unistd.h"
+    if not os.path.exists(unistd_file):
+        unistd_file = "/usr/include/x86_64-linux-gnu/asm/unistd.h"
+    syscallCmd = f"gcc -E -dD {unistd_file} | grep __NR"
+    syscallDefs = os.popen(syscallCmd).read()
+    sysList = [(int(numStr), name) for (name, numStr) in re.findall("#define __NR_(.*?) (\d+)", syscallDefs)]
+    denseList = ["INVALID"]*(max([num for (num, name) in sysList]) + 1)
+    for (num, name) in sysList: denseList[num] = name
+    return '"' + '",\n"'.join(denseList) + '"'
+
+syscallSrc = libEnv.Substfile("virt/syscall_name.cpp", "virt/syscall_name.cpp.in", SUBST_DICT = {"SYSCALL_NAME_LIST" : getSyscalls()})
+
+# Build libzsim.so
+globSrcNodes = Glob("*.cpp") + Glob("virt/*.cpp")
+
+# MeMo
+globSrcNodes += Glob("MeMo/*.cpp")
+libEnv["CPPPATH"] += ["MeMo"]
+
+# Bbl Profiler
+globSrcNodes += Glob("BbvProfiler/*.cpp")
+libEnv["CPPPATH"] += ["BbvProfiler"]
+
+libSrcs = [str(x) for x in globSrcNodes if str(x) not in harnessSrcs]
+libSrcs += [str(x) for x in syscallSrc]
+libSrcs = list(set(libSrcs)) # ensure syscallSrc is not duplicated
+libEnv.SharedLibrary("zsim.so", libSrcs)
+
+# Build harness (static to make it easier to run across environments)
+harnessEnv = env.Clone()
+harnessEnv["LIBS"] += ["pthread"]
+harnessEnv.Program("zsim", harnessSrcs + commonSrcs)

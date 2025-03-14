@@ -1,0 +1,8 @@
+build/
+data/
+logs/
+*__pycache__*
+*.vscode
+libs
+pin-*
+.venv
